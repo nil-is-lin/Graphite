@@ -55,8 +55,8 @@ rust-version = "1.88"
 edition = "2024"
 authors = ["Graphite Authors <contact@graphite.art>"]
 homepage = "https://graphite.art"
-repository = "https://github.com/GraphiteEditor/Graphite"
-license = "MIT OR Apache-2.0"
+repository = "https://github.com/nil-is-lin/Graphite.git"
+license = "Apache-2.0"
 version = "0.0.0"
 readme = "README.md"
 publish = false
@@ -258,6 +258,11 @@ node-macro = { opt-level = 2 }
 [profile.release]
 lto = "thin"
 debug = true
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
 
 [patch.crates-io]
 winit = { git = "https://github.com/timon-schelling/winit", branch = "graphite" }
