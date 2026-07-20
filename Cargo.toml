@@ -55,7 +55,7 @@ rust-version = "1.88"
 edition = "2024"
 authors = ["Graphite Authors <contact@graphite.art>"]
 homepage = "https://graphite.art"
-repository = "https://github.com/GraphiteEditor/Graphite"
+repository = "https://github.com/nil-is-lin/Graphite.git"
 license = "Apache-2.0"
 version = "0.0.0"
 readme = "README.md"
@@ -256,6 +256,11 @@ node-macro = { opt-level = 2 }
 [profile.release]
 lto = "thin"
 debug = true
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
 
 [patch.crates-io]
 # Force cargo to use only one version of the dpi crate (vendoring breaks without this)

@@ -6,7 +6,7 @@ authors = ["Graphite Authors <contact@graphite.art>"]
 
 description = "#[derive(DynAny)]"
 documentation = "https://docs.rs/dyn-any-derive"
-repository = "https://github.com/GraphiteEditor/Graphite/tree/master/libraries/dyn-any/derive"
+repository = "https://github.com/nil-is-lin/Graphite.git"
 license = "MIT OR Apache-2.0"
 readme = "../README.md"
 
