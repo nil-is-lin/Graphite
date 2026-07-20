@@ -22,8 +22,7 @@ accepted = [
 workarounds = ["ring"]
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
-# Clearly Defined's API would occasionally (every few months) return errors for at least a full day (maybe some weird rate limiting?), but we can just disable to perform local checking (see #1653)
-no-clearly-defined = true
+# Clearly Defined's API would occasionally (every few months) return errors for at least a full day (maybe some weird rate limiting?), so we perform local-only license checking by passing `--offline` to `cargo about generate` (see #1653). The old `no-clearly-defined = true` boolean was removed in cargo-about 0.6+; in 0.9.x the equivalent is the `--offline` flag (there is no config key for it).
 
 # https://raw.githubusercontent.com/briansmith/webpki/main/LICENSE
 # is the ISC license but test code within the repo is BSD-3-Clause, but is not compiled into the crate when we use it

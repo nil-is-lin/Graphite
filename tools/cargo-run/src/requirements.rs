@@ -63,7 +63,7 @@ fn requirements(task: &Task) -> Vec<Requirement> {
 			command: "cargo-about",
 			args: &["--version"],
 			name: "Cargo About",
-			install: "cargo install cargo-about".into(),
+			install: "cargo install cargo-about@0.9.1 --features cli".into(),
 			skip: Some(&|task| matches!(task.target, Target::Cli)),
 			..Default::default()
 		},
