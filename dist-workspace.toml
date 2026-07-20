@@ -2,10 +2,13 @@
 #
 # cargo-dist configuration for Graphite desktop binary releases.
 #
-# ⚠️ SCAFFOLD — not yet validated. Run `cargo dist init` on a networked macOS
-#    machine (with cargo-dist installed) to pin `cargo-dist-version` to the
-#    installed release and generate `.github/workflows/release.yml`. The values
-#    below are sensible defaults; `cargo dist init` will correct/extend them.
+# ⚠️ SCAFFOLD — finalized by running `dist init` (NOT `cargo dist init`) on a
+#    networked macOS machine with cargo-dist v0.32.0 installed. v0.32.0 installs
+#    the binary as `dist` (not `cargo-dist`), so invoke it directly:
+#        dist init --yes
+#    This pins `cargo-dist-version` and generates `.github/workflows/release.yml`.
+#    If `dist` isn't on PATH, run `source "$HOME/.cargo/env"` first, or use the
+#    full path: `/Users/nil/.cargo/bin/dist init --yes`.
 #
 # Why cargo-dist (see docs/adr/ADR-004-cargo-dist-release-tooling.md):
 #   Replaces the hand-rolled `desktop/bundle` crate (Linux is still a TODO stub)
@@ -13,8 +16,8 @@
 #   The webview host choice (CEF vs Wry) is INDEPENDENT of this — cargo-dist only
 #   packages and publishes; it does not care how the binary was built.
 
-[workspace.metadata.dist]
-cargo-dist-version = "0.13.0"
+[dist]
+cargo-dist-version = "0.32.0"
 ci = ["github"]
 installers = ["pkg", "msi", "deb", "rpm", "appimage"]
 targets = [
@@ -25,12 +28,11 @@ targets = [
 ]
 
 # Graphite-specific integration notes (carry into the generated release.yml;
-# validate on a Mac with `cargo dist init`):
+# validate with `dist init` on a Mac):
 # - Desktop binary is `graphite` from package `graphite-desktop`.
 # - cargo-dist packages `cargo build --release` output. Graphite's distributable
 #   .app/.folder is assembled by `desktop/bundle` via
 #   `cargo run -p cargo-run -- build desktop`. The release workflow must run that
-#   bundle step, then hand the artifact to cargo-dist (or keep `desktop/bundle`
-#   and let cargo-dist wrap its output). See ADR-004 for the trade-off.
+#   bundle step, then hand the artifact to cargo-dist. See ADR-004 for trade-off.
 # - Scope distribution to the `graphite` binary only; the workspace also builds
-#   `graphene-cli` (node-graph) which should NOT be shipped as a desktop release.
+#   `graphene-cli` (node-graph) which must NOT ship as a desktop release.
