@@ -177,7 +177,7 @@ pub(crate) fn render_image_data_to_canvases<'a>(image_data: impl IntoIterator<It
 		let clamped_pixels = wasm_bindgen::Clamped(pixels);
 		match ImageData::new_with_u8_clamped_array_and_sh(clamped_pixels, width, height) {
 			Ok(image_data_obj) => {
-				if context.put_image_data(&image_data_obj, 0, 0).is_err() {
+				if context.put_image_data(&image_data_obj, 0.0, 0.0).is_err() {
 					error!("Failed to put image data on canvas for id: {placeholder_id}");
 				}
 			}
