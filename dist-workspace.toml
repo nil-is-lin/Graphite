@@ -15,6 +15,16 @@
 #   `dist init` rewrites this file and resets `installers` to []; re-run
 #   `dist generate` (NOT `dist init`) after editing to avoid clobbering.
 #
+#   GOTCHA — cargo-dist v0.32.0 `--print=linkage` build bug:
+#   `dist generate` also rewrites `.github/workflows/release.yml` and re-adds
+#   `dist build ... --print=linkage`. That flag triggers cargo-dist's linkage
+#   report, which double-appends the object-file extension (e.g.
+#   "...rcgu.o.rcgu.o"). The Windows linker then fails with LNK1104 and Linux
+#   rustc fails with "could not write output ... permission denied" while building
+#   the graphite desktop binary (macOS tolerates it). After ANY `dist generate`,
+#   remove `--print=linkage` from the `dist build` line in release.yml (see the
+#   inline comment there). A plain `dist build` still produces the binary + archive.
+#
 # Why cargo-dist (see docs/adr/ADR-004-cargo-dist-release-tooling.md):
 #   Single, framework-agnostic release pipeline that replaces the hand-rolled
 #   desktop/bundle crate (Linux stub) and the Nix/Flatpak CI. The webview host
