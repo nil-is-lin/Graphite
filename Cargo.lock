@@ -2214,7 +2214,7 @@ dependencies = [
 
 [[package]]
 name = "graphite-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytemuck",
  "clap",
@@ -2368,6 +2368,7 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "spin",
+ "text-nodes",
  "thiserror 2.0.18",
  "tokio",
  "tsify",
@@ -2408,6 +2409,7 @@ dependencies = [
  "serde-wasm-bindgen",
  "serde_bytes",
  "serde_json",
+ "text-nodes",
  "tsify",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -5945,6 +5947,7 @@ dependencies = [
  "titlecase",
  "tsify",
  "unicode-segmentation",
+ "usvg",
  "vector-types",
  "wasm-bindgen",
 ]

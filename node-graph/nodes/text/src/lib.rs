@@ -3,8 +3,10 @@ mod font;
 pub mod json;
 mod path_builder;
 pub mod regex;
-mod text_context;
+mod span;
+pub mod text_context;
 mod to_path;
+pub mod math_bake;
 
 use convert_case::{Boundary, Converter, pattern};
 use core_types::graphene_hash::CacheHash;
@@ -21,6 +23,8 @@ pub use fallback::FALLBACK_FONT_RESOURCE;
 pub use font::*;
 pub use text_context::{TextContext, for_each_styled_glyph_run};
 pub use to_path::*;
+pub use span::*;
+pub use math_bake::*;
 pub use vector_types;
 
 /// Alignment of lines of type within a text block.

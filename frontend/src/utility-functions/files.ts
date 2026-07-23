@@ -19,7 +19,11 @@ export function downloadFileBlob(filename: string, blob: Blob) {
 }
 
 export function downloadFile(filename: string, content: Uint8Array) {
-	const type = filename.endsWith(".svg") ? "image/svg+xml;charset=utf-8" : "application/octet-stream";
+	const type = filename.endsWith(".svg")
+		? "image/svg+xml;charset=utf-8"
+		: filename.endsWith(".tex")
+			? "text/plain;charset=utf-8"
+			: "application/octet-stream";
 
 	if (content.length > 0 && content.buffer instanceof ArrayBuffer) {
 		const contentView = new Uint8Array(content.buffer, content.byteOffset, content.byteLength);

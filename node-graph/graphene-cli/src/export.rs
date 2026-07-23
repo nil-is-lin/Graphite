@@ -16,6 +16,7 @@ pub enum FileType {
 	Png,
 	Jpg,
 	Gif,
+	Tikz,
 }
 
 pub fn detect_file_type(path: &Path) -> Result<FileType, String> {
@@ -24,7 +25,8 @@ pub fn detect_file_type(path: &Path) -> Result<FileType, String> {
 		Some("png") => Ok(FileType::Png),
 		Some("jpg" | "jpeg") => Ok(FileType::Jpg),
 		Some("gif") => Ok(FileType::Gif),
-		_ => Err("Unsupported file extension. Supported formats: .svg, .png, .jpg, .gif".to_string()),
+		Some("tex") => Ok(FileType::Tikz),
+		_ => Err("Unsupported file extension. Supported formats: .svg, .png, .jpg, .gif, .tex".to_string()),
 	}
 }
 
@@ -40,6 +42,7 @@ pub async fn export_document(
 	// Determine export format based on file type
 	let export_format = match file_type {
 		FileType::Svg => ExportFormat::Svg,
+		FileType::Tikz => ExportFormat::Tikz,
 		_ => ExportFormat::Raster,
 	};
 
@@ -66,6 +69,11 @@ pub async fn export_document(
 				// Write SVG directly to file
 				std::fs::write(&output_path, svg)?;
 				log::info!("Exported SVG to: {}", output_path.display());
+			}
+			RenderOutputType::Tikz { tikz } => {
+				// Write TikZ directly to file
+				std::fs::write(&output_path, tikz)?;
+				log::info!("Exported TikZ to: {}", output_path.display());
 			}
 			RenderOutputType::Texture(texture) => {
 				// Convert GPU texture to CPU buffer
@@ -113,7 +121,7 @@ fn write_raster_image(output_path: PathBuf, file_type: FileType, data: Vec<u8>, 
 			image.write_to(&mut cursor, ImageFormat::Jpeg)?;
 			log::info!("Exported JPG to: {}", output_path.display());
 		}
-		FileType::Svg | FileType::Gif => unreachable!("SVG and GIF should have been handled in export_document"),
+		FileType::Svg | FileType::Gif | FileType::Tikz => unreachable!("SVG, GIF and TikZ should have been handled in export_document"),
 	}
 
 	std::fs::write(&output_path, cursor.into_inner())?;

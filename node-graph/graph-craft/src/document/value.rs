@@ -863,6 +863,9 @@ pub enum RenderOutputType {
 		svg: String,
 		image_data: Vec<(u64, Image<Color>)>,
 	},
+	Tikz {
+		tikz: String,
+	},
 	#[cfg(target_family = "wasm")]
 	CanvasFrame {
 		canvas_id: u64,
@@ -883,6 +886,9 @@ impl CacheHash for RenderOutputType {
 			Self::Svg { svg, image_data } => {
 				svg.cache_hash(state);
 				image_data.cache_hash(state);
+			}
+			Self::Tikz { tikz } => {
+				tikz.cache_hash(state);
 			}
 			#[cfg(target_family = "wasm")]
 			Self::CanvasFrame { canvas_id, resolution } => {

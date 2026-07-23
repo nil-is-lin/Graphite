@@ -62,6 +62,8 @@ pub enum ExportFormat {
 	#[default]
 	Svg,
 	Raster,
+	/// Emit a TikZ (`tikzpicture`) representation. See `docs/adr/ADR-005-tikz-export.md`.
+	Tikz,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, DynAny, CacheHash)]

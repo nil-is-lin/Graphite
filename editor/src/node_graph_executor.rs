@@ -289,10 +289,10 @@ impl NodeGraphExecutor {
 		let network = document.network_interface.document_network().clone();
 		let resources = document.resources.registry.clone();
 
-		let export_format = if export_config.file_type == FileType::Svg {
-			graphene_std::application_io::ExportFormat::Svg
-		} else {
-			graphene_std::application_io::ExportFormat::Raster
+		let export_format = match export_config.file_type {
+			FileType::Svg => graphene_std::application_io::ExportFormat::Svg,
+			FileType::Tikz => graphene_std::application_io::ExportFormat::Tikz,
+			_ => graphene_std::application_io::ExportFormat::Raster,
 		};
 
 		// Calculate the bounding box of the region to be exported (artboard bounds always contribute).
@@ -736,6 +736,7 @@ impl NodeGraphExecutor {
 			FileType::Svg => "svg",
 			FileType::Png => "png",
 			FileType::Jpg => "jpg",
+			FileType::Tikz => "tex",
 		};
 		let base_name = match (artboard_name, artboard_count) {
 			(Some(artboard_name), count) if count > 1 => format!("{name} - {artboard_name}"),
@@ -760,6 +761,16 @@ impl NodeGraphExecutor {
 					let size = size.as_dvec2().into();
 					responses.add(FrontendMessage::TriggerExportImage { svg, name, mime, size });
 				}
+			}
+			TaggedValue::RenderOutput(RenderOutput {
+				data: RenderOutputType::Tikz { tikz, .. },
+				..
+			}) if file_type == FileType::Tikz => {
+				responses.add(FrontendMessage::TriggerSaveFile {
+					name,
+					folder,
+					content: tikz.into_bytes().into(),
+				});
 			}
 			#[cfg(feature = "gpu")]
 			TaggedValue::RenderOutput(RenderOutput {
@@ -799,9 +810,12 @@ impl NodeGraphExecutor {
 						}
 					}
 					FileType::Svg => {
-						return Err("SVG cannot be exported from an image buffer".to_string());
-					}
+					return Err("SVG cannot be exported from an image buffer".to_string());
 				}
+				FileType::Tikz => {
+					return Err("TikZ cannot be exported from an image buffer".to_string());
+				}
+			}
 
 				responses.add(FrontendMessage::TriggerSaveFile {
 					name,

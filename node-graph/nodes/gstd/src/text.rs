@@ -103,7 +103,7 @@ fn text_to_vector(
 	/// A styled text string produced by the **Text** node (or any other string source).
 	string: Item<String>,
 ) -> Item<Vector> {
-	shape_text_item(&string, false).into_iter().next().unwrap_or_default()
+	Item::new_from_element(merge_vectors(shape_text_item_with_math(&string, false)))
 }
 
 /// Splits a styled text string into a separate vector item for each of its glyphs (letterforms).
@@ -113,5 +113,5 @@ fn text_to_vector_glyphs(
 	/// A styled text string produced by the **Text** node (or any other string source).
 	string: Item<String>,
 ) -> List<Vector> {
-	shape_text_item(&string, true)
+	shape_text_item_with_math(&string, true)
 }

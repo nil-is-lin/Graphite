@@ -26,6 +26,7 @@ crate-type = ["cdylib", "rlib"]
 editor = { path = "../../editor", package = "graphite-editor", optional = true }
 graphite-proc-macros = { workspace = true }
 graphene-std = { workspace = true, optional = true }
+text-nodes = { workspace = true }
 
 # Workspace dependencies
 graph-craft = { workspace = true, optional = true }

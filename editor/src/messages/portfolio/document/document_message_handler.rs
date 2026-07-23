@@ -47,10 +47,11 @@ use graphene_std::vector::misc::dvec2_to_point;
 use graphene_std::vector::style::RenderMode;
 use graphene_std::vector::{PointId, graphic_types};
 use kurbo::{Affine, BezPath, Line, PathSeg};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use text_nodes::math_bake;
 
 #[derive(ExtractField)]
 pub struct DocumentMessageContext<'a> {
@@ -126,6 +127,13 @@ pub struct DocumentMessageHandler {
 	/// Transient migration state, but persisted in the saved document so unfinished bakes retry on the next open instead of losing placement.
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub(crate) pending_gradient_bbox_bake: Vec<(Vec<NodeId>, NodeId, graphic_types::migrations::legacy::LegacyGradient)>,
+	/// Persisted bake cache for inline LaTeX math (`$...$` / `$$...$$`): maps a math `source` string
+	/// to the SVG path `d` strings produced by the bake engine (KaTeX or `typst`+`mitex`). Stored so
+	/// documents reopen with their typeset math intact even when no bake engine is available
+	/// (headless/CLI export, offline). The live process-wide cache in `text_nodes::math_bake` is
+	/// repopulated from this on load via `math_bake::import_cache`.
+	#[serde(default, skip_serializing_if = "HashMap::is_empty")]
+	pub math_bake_cache: HashMap<String, Vec<String>>,
 
 	// =============================================
 	// Fields omitted from the saved document format
@@ -189,6 +197,7 @@ impl Default for DocumentMessageHandler {
 			graph_fade_artwork_percentage: 80.,
 			// TODO: Eventually remove this document upgrade code
 			pending_gradient_bbox_bake: Vec::new(),
+			math_bake_cache: HashMap::new(),
 			// =============================================
 			// Fields omitted from the saved document format
 			// =============================================
@@ -1054,9 +1063,12 @@ impl MessageHandler<DocumentMessage, DocumentMessageContext<'_>> for DocumentMes
 					document.resources.collect_garbage(document.used_resources(false).as_ref());
 					document.resources.embed_resources(resources_load_handle).await;
 
-					// Legacy .graphite blob with resources embedded inline, so it is self-contained and also
-					// serves as the .gdd recovery fallback.
-					let legacy_document = document.serialize_document().into_bytes();
+				// Legacy .graphite blob with resources embedded inline, so it is self-contained and also
+				// serves as the .gdd recovery fallback.
+				// Persist the inline-math bake cache so the document reopens with typeset math intact
+				// even when no bake engine (KaTeX/typst) is available (headless export, offline).
+				document.math_bake_cache = math_bake::export_cache();
+				let legacy_document = document.serialize_document().into_bytes();
 
 					// A .gdd exports the working copy with the legacy blob embedded, falling back to the bare
 					// blob when there is no working copy or the export fails.
@@ -2186,6 +2198,9 @@ impl DocumentMessageHandler {
 				})
 			})
 			.map_err(|e| EditorError::DocumentDeserialization(e.to_string()))?;
+		// Repopulate the process-wide bake cache from the persisted entries so typeset math
+		// reappears without needing a bake engine (KaTeX/typst) available at load time.
+		math_bake::import_cache(&document_message_handler.math_bake_cache);
 		Ok(document_message_handler)
 	}
 

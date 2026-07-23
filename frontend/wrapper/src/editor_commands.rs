@@ -26,6 +26,7 @@ mod editor_commands {
 	use graph_craft::document::NodeId;
 	use graphene_std::raster::color::Color;
 	use graphene_std::vector::style::FillChoice;
+	use text_nodes::math_bake::cache_baked_math_svg;
 	use std::path::PathBuf;
 
 	/// Re-sends all UI layouts to the frontend. Called during HMR re-mounts when the frontend has lost its layout state.
@@ -370,6 +371,16 @@ mod editor_commands {
 	/// A text box was changed
 	fn update_bounds(new_text: String) -> Message {
 		TextToolMessage::UpdateBounds { new_text }.into()
+	}
+
+	/// Feed MathJax-baked math geometry into Rust's cache (P2b). The frontend runs MathJax on each
+	/// `$...$`/`$$...$$` span, extracts the SVG `<path d>` strings, and calls this with the LaTeX
+	/// `source`, the text `font_size`, and the path strings. Rust normalizes them into the span's
+	/// local frame and stores them under the source hash so the render path reuses them instead of
+	/// re-baking or falling back. No-op message; the work is a side-effecting cache insert.
+	fn cache_baked_math(source: String, font_size: f64, svg_paths: Vec<String>) -> Message {
+		cache_baked_math_svg(&source, font_size, &svg_paths);
+		Message::NoOp
 	}
 
 	/// Update primary color from sRGB bytes (the wire format at the JS boundary).

@@ -6,7 +6,7 @@ use graph_craft::document::value::{RenderOutput, RenderOutputType};
 use graphene_application_io::{ExportFormat, RenderConfig};
 use graphic_types::raster_types::{CPU, Raster};
 use graphic_types::{Artboard, Graphic, Vector};
-use rendering::{Render, RenderMetadata, RenderOutputType as RenderOutputTypeRequest, RenderParams, SvgRender, SvgRenderOutput};
+use rendering::{Render, RenderMetadata, RenderOutputType as RenderOutputTypeRequest, RenderParams, SvgRender, SvgRenderOutput, TikzRender, TikzRenderOutput};
 use std::sync::Arc;
 use vector_types::Gradient;
 use wgpu_executor::{RenderContext, WgpuExecutor};
@@ -15,6 +15,7 @@ use wgpu_executor::{RenderContext, WgpuExecutor};
 pub enum RenderIntermediateType {
 	Vello(Arc<(vello::Scene, RenderContext)>),
 	Svg(Arc<SvgRenderOutput>),
+	Tikz(Arc<TikzRenderOutput>),
 }
 #[derive(Clone, dyn_any::DynAny)]
 pub struct RenderIntermediate {
@@ -70,6 +71,16 @@ async fn render_intermediate<'a: 'n, T: 'static + Render + WasmNotSend + Send + 
 				metadata,
 			}
 		}
+		RenderOutputTypeRequest::Tikz => {
+			let mut render = TikzRender::new();
+
+			data.render_tikz(&mut render, render_params);
+
+			RenderIntermediate {
+				ty: RenderIntermediateType::Tikz(Arc::new(render.into())),
+				metadata,
+			}
+		}
 	};
 
 	Item::new_from_element(intermediate)
@@ -108,6 +119,12 @@ async fn render<'a: 'n>(
 				svg: output.svg,
 				image_data: output.image_data.into_iter().map(|(image, id)| (id, image.0)).collect(),
 			}
+		}
+		(RenderOutputTypeRequest::Tikz, RenderIntermediateType::Tikz(data)) => {
+			// Coordinates (including the document transform) are baked into path coordinates during
+			// traversal, so unlike SVG there is no post-hoc `wrap_with_transform`. The tikzpicture
+			// wrapper (with the yscale=-1 flip) is applied exactly once here.
+			RenderOutputType::Tikz { tikz: data.to_document() }
 		}
 		(RenderOutputTypeRequest::Vello, RenderIntermediateType::Vello(data)) => {
 			let (scene, context) = data.as_ref();
@@ -160,6 +177,7 @@ async fn create_context<'a: 'n>(
 	let render_output_type = match render_config.export_format {
 		ExportFormat::Svg => RenderOutputTypeRequest::Svg,
 		ExportFormat::Raster => RenderOutputTypeRequest::Vello,
+		ExportFormat::Tikz => RenderOutputTypeRequest::Tikz,
 	};
 
 	let logical_viewport = render_config.viewport;

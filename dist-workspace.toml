@@ -16,17 +16,20 @@
 #   `dist generate` (NOT `dist init`) after editing to avoid clobbering.
 #
 # Why cargo-dist (see docs/adr/ADR-004-cargo-dist-release-tooling.md):
-#   Single, framework-agnostic release pipeline that replaces the hand-rolled
-#   desktop/bundle crate (Linux stub) and the Nix/Flatpak CI. The webview host
-#   (CEF vs Wry) is INDEPENDENT — cargo-dist only packages/publishes the binary
-#   from `cargo build --release`; it does not care how the binary was built.
+#   Framework-agnostic release pipeline that generates per-OS installers
+#   (shell/msi/pkg/...) and uploads them to GitHub Releases. cargo-dist ONLY
+#   packages/publishes the `cargo build --release` output (Option A: bare binary
+#   archives/installers); it does NOT assemble Graphite's .app/.folder. The
+#   webview host (CEF vs Wry, ADR-002) is INDEPENDENT of this layer.
 #
 # IMPORTANT — Graphite-specific integration (NOT yet wired into release.yml):
 #   - Desktop binary is `graphite` from package `graphite-desktop`.
-#   - cargo-dist packages the `cargo build --release` output (Option A: bare
-#     binary archives/installers). Graphite's distributable .app/.folder is
-#     assembled by `desktop/bundle` via `cargo run -p cargo-run -- build desktop`
-#     — DEFERRED (see ADR-004); a later release can inject that bundle step.
+#   - `desktop/bundle` is STILL the active packager: `cargo run -p cargo-run --
+#     build desktop` invokes it (tools/cargo-run/src/main.rs) to assemble
+#     Graphite.app (macOS) / Graphite/ (Windows). It is NOT yet replaced by
+#     cargo-dist — its removal is a DEFERRED follow-up (ADR-004) that requires
+#     (a) cargo-dist .app assembly wiring AND (b) ADR-002 (drop CEF) landing
+#     first. Do NOT delete `desktop/bundle` until BOTH are done.
 #   - Scope distribution to the `graphite` binary only; the workspace also builds
 #     `graphene-cli` (node-graph) which must NOT ship as a desktop release.
 

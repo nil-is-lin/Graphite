@@ -16,6 +16,7 @@
 	import { fillChoiceUIColor, createSRgba8 } from "/src/utility-functions/colors";
 	import { pasteFile } from "/src/utility-functions/files";
 	import { textInputCleanup } from "/src/utility-functions/keyboard-entry";
+	import { bakeMath, renderMathPreview } from "/src/utility-functions/math-bake";
 	import { rasterizeSVGCanvas } from "/src/utility-functions/rasterization";
 	import { setupViewportResizeObserver, hasFirstArtworkBeenReceived, markFirstArtworkReceived } from "/src/utility-functions/viewports";
 	import type { EditorWrapper, MenuDirection, MouseCursorIcon, SRGBA8 } from "/wrapper/pkg/graphite_wasm_wrapper";
@@ -32,7 +33,10 @@
 
 	// Interactive text editing
 	let textInput: undefined | HTMLDivElement = undefined;
+	let textPreview: undefined | HTMLDivElement = undefined;
 	let showTextInput: boolean;
+	// Font size of the active text edit, used to normalize KaTeX-baked math geometry.
+	let currentTextFontSize = 24;
 	let textInputMatrix: [number, number, number, number, number, number];
 
 	// Scrollbars
@@ -355,14 +359,20 @@
 	}
 
 	// Text entry
-	export function triggerTextCommit() {
+	export async function triggerTextCommit() {
 		if (!textInput) return;
 		const textCleaned = textInputCleanup(textInput.innerText);
+		// Await the bake so the Rust cache is populated before the graph evaluates the text node.
+		await bakeMath(editor, textCleaned, currentTextFontSize);
+		renderMathPreview(textCleaned).then((html) => {
+			if (textPreview) textPreview.innerHTML = html;
+		});
 		editor.onChangeText(textCleaned, false);
 	}
 
 	export async function displayEditableTextbox(data: MessageBody<"DisplayEditableTextbox">) {
 		showTextInput = true;
+		currentTextFontSize = data.fontSize;
 
 		await tick();
 
@@ -372,6 +382,11 @@
 		if (data.text === "") textInput.textContent = "";
 		// eslint-disable-next-line svelte/no-dom-manipulating
 		else textInput.textContent = `${data.text}\n`;
+
+		// Seed the live preview with the existing content so typeset math shows immediately.
+		renderMathPreview(data.text).then((html) => {
+			if (textPreview) textPreview.innerHTML = html;
+		});
 
 		// Make it so `maxHeight` is a multiple of `lineHeight`
 		const lineHeight = data.lineHeightRatio * data.fontSize;
@@ -389,7 +404,13 @@
 
 		textInput.oninput = () => {
 			if (!textInput) return;
-			editor.updateBounds(textInputCleanup(textInput.innerText));
+			const liveText = textInputCleanup(textInput.innerText);
+			// Fire-and-forget: the cache populates a tick later; the canvas only re-renders on commit.
+			void bakeMath(editor, liveText, currentTextFontSize);
+			renderMathPreview(liveText).then((html) => {
+				if (textPreview) textPreview.innerHTML = html;
+			});
+			editor.updateBounds(liveText);
 		};
 
 		textInputMatrix = data.transform;
@@ -704,6 +725,9 @@
 						{/if}
 						<div class="text-input" style:width={canvasWidthCSS} style:height={canvasHeightCSS} style:pointer-events={showTextInput ? "auto" : ""}>
 							{#if showTextInput}
+								<!-- Live typeset preview of the math (P3, ADR-006): anchored above the editable box via the same
+								     document transform, shifted up by its own height so it never overlaps the raw source being typed. -->
+								<div bind:this={textPreview} class="text-preview" style:transform="matrix({textInputMatrix}) translate(0, -100%)"></div>
 								<div bind:this={textInput} style:transform="matrix({textInputMatrix})" on:scroll={preventTextEditingScroll}></div>
 							{/if}
 						</div>
@@ -955,6 +979,37 @@
 						.text-input {
 							word-break: break-all;
 							unicode-bidi: plaintext;
+
+							.text-preview {
+								position: absolute;
+								top: 0;
+								left: 0;
+								pointer-events: none;
+								z-index: 1;
+								max-width: 480px;
+								padding: 2px 6px;
+								border-radius: 4px;
+								background: color-mix(in srgb, var(--color-2-mildblack) 88%, transparent);
+								box-shadow: 0 1px 5px rgba(0, 0, 0, 0.45);
+								color: var(--color-f-white, #fff);
+							white-space: pre-wrap;
+							word-break: break-word;
+							// Sits one line above the editable box; the `-100%` translate (set inline) places it fully above.
+							font-size: 14px;
+							line-height: 1.3;
+
+							// MathJax SVGs use `currentColor` and scale to the surrounding text.
+							:global(.mathjax-preview) {
+								display: inline-block;
+								vertical-align: middle;
+							}
+							:global(.mathjax-preview svg) {
+								display: inline-block;
+								vertical-align: middle;
+								width: auto;
+								height: 1.1em;
+							}
+						}
 						}
 
 						.shader-compiling-overlay {

@@ -94,7 +94,7 @@ impl DialogLayoutHolder for ExportDialogMessageHandler {
 
 impl LayoutHolder for ExportDialogMessageHandler {
 	fn layout(&self) -> Layout {
-		let entries = [(FileType::Png, "PNG"), (FileType::Jpg, "JPG"), (FileType::Svg, "SVG")]
+		let entries = [(FileType::Png, "PNG"), (FileType::Jpg, "JPG"), (FileType::Svg, "SVG"), (FileType::Tikz, "TikZ")]
 			.into_iter()
 			.map(|(file_type, name)| {
 				RadioEntryData::new(format!("{file_type:?}"))

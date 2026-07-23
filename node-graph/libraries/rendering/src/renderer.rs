@@ -1,4 +1,5 @@
 use crate::render_ext::{PaintTarget, RenderExt};
+use crate::tikz::{apply_affine_to_bezpath, bezpath_to_tikz, tikz_color, TikzRender};
 use crate::to_peniko::{BlendModeExt, ToPenikoColor};
 use core_types::CacheHash;
 use core_types::blending::BlendMode;
@@ -26,7 +27,7 @@ use graphic_types::raster_types::{BitmapMut, CPU, GPU, Image, Raster, Texture};
 use graphic_types::vector_types::gradient::{Gradient, GradientType};
 use graphic_types::vector_types::subpath::Subpath;
 use graphic_types::vector_types::vector::click_target::{ClickTarget, FreePoint};
-use graphic_types::vector_types::vector::style::{PaintOrder, RenderMode, StrokeAlign, StrokeCap, StrokeJoin};
+use graphic_types::vector_types::vector::style::{PaintOrder, RenderMode, Stroke, StrokeAlign, StrokeCap, StrokeJoin};
 use graphic_types::{Artboard, Graphic, Vector};
 use kurbo::{Affine, BezPath, Cap, Join, Shape, StrokeOpts};
 use num_traits::Zero;
@@ -206,6 +207,8 @@ pub enum RenderOutputType {
 	#[default]
 	Svg,
 	Vello,
+	/// Emit a TikZ (`tikzpicture`) representation instead of SVG. See `docs/adr/ADR-005-tikz-export.md`.
+	Tikz,
 }
 
 /// Static state used whilst rendering
@@ -440,6 +443,72 @@ fn create_peniko_gradient_brush(gradient_list: &List<Gradient>, multiplied_trans
 	Some((brush, gradient_to_device))
 }
 
+/// Build the TikZ `draw=…, line width=…, …` option string for a stroke painted with `color`.
+///
+/// Shared by the solid-color and gradient-stroke arms so the cap/join/dash/opacity logic
+/// lives in exactly one place.
+fn tikz_stroke_opts(color: Color, stroke: &Stroke, group_opacity: f64) -> String {
+	let weight = stroke.weight();
+	let cap = match stroke.cap {
+		StrokeCap::Butt => "butt",
+		StrokeCap::Round => "round",
+		StrokeCap::Square => "rect",
+	};
+	let join = match stroke.join {
+		StrokeJoin::Miter => "miter",
+		StrokeJoin::Bevel => "bevel",
+		StrokeJoin::Round => "round",
+	};
+	let mut opts = format!("draw={}, line width={weight:.3}pt, line cap={cap}, line join={join}", tikz_color(color));
+	let alpha = group_opacity * color.a() as f64;
+	if alpha < 1. {
+		opts.push_str(&format!(", opacity={alpha:.3}"));
+	}
+	if !stroke.dash_lengths.is_empty() {
+		let pattern: Vec<String> = stroke
+			.dash_lengths
+			.iter()
+			.enumerate()
+			.map(|(i, d)| if i % 2 == 0 { format!("on {d:.3}pt") } else { format!("off {d:.3}pt") })
+			.collect();
+		opts.push_str(&format!(", dash pattern={}", pattern.join(" ")));
+	}
+	opts
+}
+
+/// Best-effort TikZ shading for a 2-stop gradient fill.
+///
+/// Returns `Some(tikz_command)` for a linear/radial gradient with exactly two stops;
+/// `None` otherwise (the caller then falls back to a solid fill of the first stop).
+fn tikz_gradient_fill(gradient_list: &List<Gradient>, device_transform: DAffine2, path: &str, group_opacity: f64, even_odd: bool) -> Option<String> {
+	let gradient = gradient_list.element(0)?;
+	let gradient_type: GradientType = gradient_list.attribute_cloned_or_default(ATTR_GRADIENT_TYPE, 0);
+	let gradient_transform: DAffine2 = gradient_list.attribute_cloned_or_default(ATTR_TRANSFORM, 0);
+	if gradient.color.len() != 2 {
+		return None;
+	}
+	let c0 = tikz_color(gradient.color[0]);
+	let c1 = tikz_color(gradient.color[1]);
+	let opacity = if group_opacity < 1. { format!(", opacity={group_opacity:.3}") } else { String::new() };
+	let even_odd = if even_odd { ", even odd rule" } else { "" };
+	let placement = gradient_placement(device_transform * gradient_transform, gradient_type);
+	match gradient_type {
+		GradientType::Linear => {
+			let start = placement.transform_point2(DVec2::ZERO);
+			let end = placement.transform_point2(DVec2::X);
+			// Negate the y-component: the tikzpicture applies `yscale=-1`, so the on-page
+			// gradient direction is the Graphite direction with y flipped.
+			let angle = (-(end.y - start.y)).atan2(end.x - start.x).to_degrees();
+			Some(format!("\\shade[shading angle={angle:.1}{opacity}{even_odd}, left color={c0}, right color={c1}] {path};"))
+		}
+		GradientType::Radial => {
+			// TikZ's radial shading is centered on the path bounding box, so this approximates
+			// the true gradient center/radius rather than matching it exactly.
+			Some(format!("\\shade[inner color={c0}, outer color={c1}{opacity}{even_odd}] {path};"))
+		}
+	}
+}
+
 // TODO: Click targets can be removed from the render output, since the vector data is available in the vector modify data from Monitor nodes.
 // This will require that the transform for child layers into that layer space be calculated, or it could be returned from the RenderOutput instead of click targets.
 #[derive(Debug, Default, Clone, PartialEq, DynAny)]
@@ -519,6 +588,10 @@ pub struct Background {
 // TODO: Rename to "Graphical"
 pub trait Render: BoundingBox + RenderComplexity {
 	fn render_svg(&self, render: &mut SvgRender, render_params: &RenderParams);
+	/// Emit a TikZ (`tikzpicture`) representation. Core geometry (paths, transforms, solid
+	/// fills/strokes, opacity, dash, even-odd) is fully supported; gradients, text, rasters,
+	/// blend modes and clips are degraded to comments. See `docs/adr/ADR-005-tikz-export.md`.
+	fn render_tikz(&self, render: &mut TikzRender, render_params: &RenderParams);
 
 	fn render_to_vello(&self, scene: &mut Scene, transform: DAffine2, context: &mut RenderContext, _render_params: &RenderParams);
 
@@ -554,6 +627,19 @@ impl Render for Graphic {
 			Graphic::Color(list) => list.render_svg(render, render_params),
 			Graphic::Gradient(list) => list.render_svg(render, render_params),
 			Graphic::Text(list) => list.render_svg(render, render_params),
+		}
+	}
+
+	fn render_tikz(&self, render: &mut TikzRender, render_params: &RenderParams) {
+		match self {
+			Graphic::Graphic(list) => list.render_tikz(render, render_params),
+			Graphic::Vector(list) => list.render_tikz(render, render_params),
+			Graphic::RasterCPU(list) => list.render_tikz(render, render_params),
+			Graphic::RasterGPU(list) => list.render_tikz(render, render_params),
+			Graphic::Color(list) => list.render_tikz(render, render_params),
+			Graphic::Gradient(list) => list.render_tikz(render, render_params),
+			Graphic::Text(list) => list.render_tikz(render, render_params),
+			Graphic::None => render.comment("Graphic::None (no content) skipped in TikZ export"),
 		}
 	}
 
@@ -763,6 +849,26 @@ impl Render for List<Artboard> {
 		}
 	}
 
+		fn render_tikz(&self, render: &mut TikzRender, render_params: &RenderParams) {
+		for index in 0..self.len() {
+			let Some(content) = self.element(index).map(Artboard::as_graphic_list) else { continue };
+			let (location, dimensions, background, _clip) = read_artboard_attributes(self, index);
+
+			// Background rectangle (degraded: solid fill, no alpha-compositing nuance).
+			let bg = tikz_color(background);
+			let x = location.x.min(location.x + dimensions.x);
+			let y = location.y.min(location.y + dimensions.y);
+			let (w, h) = (dimensions.x.abs(), dimensions.y.abs());
+			let (bx, by) = (x + w, y + h);
+			render.expand_rect(x, y, bx, by);
+			render.push(format!("\\path[fill={bg}] ({x:.3},{y:.3}) rectangle ({bx:.3},{by:.3});", bg = bg, x = x, y = y, bx = bx, by = by));
+
+			render.push_transform(DAffine2::from_translation(location));
+			content.render_tikz(render, render_params);
+			render.pop_transform();
+		}
+	}
+
 	fn render_to_vello(&self, scene: &mut Scene, transform: DAffine2, context: &mut RenderContext, render_params: &RenderParams) {
 		use vello::peniko;
 
@@ -888,6 +994,19 @@ impl Render for List<Graphic> {
 					element.render_svg(render, render_params);
 				},
 			);
+		}
+	}
+
+	fn render_tikz(&self, render: &mut TikzRender, render_params: &RenderParams) {
+		for index in 0..self.len() {
+			let element = self.element(index).unwrap();
+			let transform: DAffine2 = self.attribute_cloned_or_default(ATTR_TRANSFORM, index);
+			let opacity: f64 = self.attribute_cloned_or(ATTR_OPACITY, index, 1.);
+			render.push_transform(transform);
+			render.push_opacity(opacity);
+			element.render_tikz(render, render_params);
+			render.pop_opacity();
+			render.pop_transform();
 		}
 	}
 
@@ -1272,6 +1391,122 @@ impl Render for List<Vector> {
 					bounds_matrix,
 					render_params,
 				);
+			}
+		}
+	}
+
+	fn render_tikz(&self, render: &mut TikzRender, render_params: &RenderParams) {
+		for index in 0..self.len() {
+			let Some(vector) = self.element(index) else { continue };
+			let item_transform: DAffine2 = self.attribute_cloned_or_default(ATTR_TRANSFORM, index);
+			let opacity_attr: f64 = self.attribute_cloned_or(ATTR_OPACITY, index, 1.);
+			let opacity_fill_attr: f64 = self.attribute_cloned_or(ATTR_OPACITY_FILL, index, 1.);
+
+			let has_real_stroke = vector.stroke.as_ref().filter(|stroke| stroke.weight() > 0.);
+			let set_stroke_transform = has_real_stroke.map(|stroke| stroke.transform).filter(|transform| transform_is_invertible(*transform));
+			let applied_stroke_transform = set_stroke_transform.unwrap_or(item_transform);
+			if set_stroke_transform.is_some() && vector.stroke.as_ref().map(|s| s.align).is_some_and(|a| a.is_not_centered()) {
+				render.comment("Graphite stroke alignment (inside/outside) is not representable in TikZ; approximated as centered");
+			}
+
+			// Bake all ancestor + vector transforms into the path coordinates.
+			let baked = render.current_transform() * applied_stroke_transform;
+			let mut path = String::new();
+			for mut bezpath in vector.stroke_bezpath_iter() {
+				apply_affine_to_bezpath(&mut bezpath, baked);
+				path.push_str(&bezpath_to_tikz(&bezpath));
+			}
+			if path.is_empty() {
+				continue;
+			}
+
+			let fill_graphic_list = graphic_list_at(self, index, ATTR_FILL);
+			let stroke_graphic_list = graphic_list_at(self, index, ATTR_STROKE);
+			let group_opacity = render.current_opacity() * opacity_attr * if render_params.for_mask { 1. } else { opacity_fill_attr };
+
+			// Fill
+			if let Some(list) = fill_graphic_list.as_deref() {
+				match list.element(0) {
+					Some(Graphic::Color(palette)) => {
+						if let Some(color) = palette.element(0) {
+							let mut opts = format!("fill={}", tikz_color(*color));
+							let alpha = group_opacity * color.a() as f64;
+							if alpha < 1. {
+								opts.push_str(&format!(", fill opacity={alpha:.3}"));
+							}
+							if vector.is_branching() {
+								opts.push_str(", even odd rule");
+							}
+							render.push(format!("\\path[{opts}] {path};"));
+						} else {
+							render.comment("Empty color palette in TikZ export; fill skipped");
+						}
+					}
+					Some(Graphic::Gradient(grad_list)) => {
+					if let Some(cmd) = tikz_gradient_fill(grad_list, render.current_transform() * item_transform, &path, group_opacity, vector.is_branching()) {
+						render.push(cmd);
+					} else if let Some(color) = grad_list.element(0).and_then(|g| g.color.first().copied()) {
+						let mut opts = format!("fill={}", tikz_color(color));
+						if group_opacity < 1. {
+							opts.push_str(&format!(", fill opacity={group_opacity:.3}"));
+						}
+						if vector.is_branching() {
+							opts.push_str(", even odd rule");
+						}
+						render.push(format!("\\path[{opts}] {path};"));
+					}
+					render.comment("Graphite gradient degraded: TikZ \\shade supports at most 2 stops (linear/radial); multi-stop gradients are approximated as a solid fill");
+				}
+					_ => render.comment("Graphite non-color fill degraded in TikZ export"),
+				}
+			}
+
+			// Stroke
+			if let Some(stroke) = vector.stroke.as_ref() {
+				if stroke.has_renderable_stroke() {
+					match stroke_graphic_list.as_deref().and_then(|l| l.element(0)) {
+						Some(Graphic::Color(palette)) => {
+							if let Some(color) = palette.element(0) {
+							let weight = stroke.weight();
+							let cap = match stroke.cap {
+								StrokeCap::Butt => "butt",
+								StrokeCap::Round => "round",
+								StrokeCap::Square => "rect",
+							};
+							let join = match stroke.join {
+								StrokeJoin::Miter => "miter",
+								StrokeJoin::Bevel => "bevel",
+								StrokeJoin::Round => "round",
+							};
+							let mut opts = format!("draw={}, line width={weight:.3}pt, line cap={cap}, line join={join}", tikz_color(*color));
+							let alpha = group_opacity * color.a() as f64;
+							if alpha < 1. {
+								opts.push_str(&format!(", opacity={alpha:.3}"));
+							}
+							if !stroke.dash_lengths.is_empty() {
+								let pattern: Vec<String> = stroke
+									.dash_lengths
+									.iter()
+									.enumerate()
+									.map(|(i, d)| if i % 2 == 0 { format!("on {d:.3}pt") } else { format!("off {d:.3}pt") })
+									.collect();
+								opts.push_str(&format!(", dash pattern={}", pattern.join(" ")));
+							}
+							render.push(format!("\\path[{opts}] {path};"));
+						} else {
+							render.comment("Empty color palette in TikZ export; stroke skipped");
+						}
+						}
+						Some(Graphic::Gradient(grad_list)) => {
+							render.comment("Graphite gradient stroke approximated as a solid stroke (TikZ cannot stroke with a gradient)");
+							if let Some(color) = grad_list.element(0).and_then(|g| g.color.first().copied()) {
+								let opts = tikz_stroke_opts(color, stroke, group_opacity);
+								render.push(format!("\\path[{opts}] {path};"));
+							}
+						}
+						_ => render.comment("Graphite non-color stroke degraded in TikZ export"),
+					}
+				}
 			}
 		}
 	}
@@ -1810,6 +2045,10 @@ impl Render for List<Raster<CPU>> {
 		}
 	}
 
+	fn render_tikz(&self, render: &mut TikzRender, _render_params: &RenderParams) {
+		render.comment("Raster (CPU) layers are not representable in TikZ export; skipped");
+	}
+
 	fn render_to_vello(&self, scene: &mut Scene, transform: DAffine2, _: &mut RenderContext, render_params: &RenderParams) {
 		for index in 0..self.len() {
 			let Some(image) = self.element(index) else { continue };
@@ -1899,6 +2138,10 @@ impl Render for List<Raster<CPU>> {
 static LAZY_ARC_VEC_ZERO_U8: LazyLock<Arc<Vec<u8>>> = LazyLock::new(|| Arc::new(Vec::new()));
 
 impl Render for List<Raster<GPU>> {
+	fn render_tikz(&self, render: &mut TikzRender, _render_params: &RenderParams) {
+		render.comment("Raster (GPU) layers are not representable in TikZ export; skipped");
+	}
+
 	fn render_svg(&self, _render: &mut SvgRender, _render_params: &RenderParams) {
 		log::warn!("tried to render texture as an svg");
 	}
@@ -2027,6 +2270,10 @@ impl Render for List<Color> {
 		}
 	}
 
+	fn render_tikz(&self, render: &mut TikzRender, _render_params: &RenderParams) {
+		render.comment("Color list reached as top-level TikZ content; fills are emitted by the parent vector (skipped here)");
+	}
+
 	fn render_to_vello(&self, scene: &mut Scene, _parent_transform: DAffine2, _context: &mut RenderContext, render_params: &RenderParams) {
 		use vello::peniko;
 
@@ -2148,6 +2395,10 @@ impl Render for List<Gradient> {
 				}
 			});
 		}
+	}
+
+	fn render_tikz(&self, render: &mut TikzRender, _render_params: &RenderParams) {
+		render.comment("Gradient fills are degraded in TikZ export (shading not yet emitted); skipped as top-level content");
 	}
 
 	fn render_to_vello(&self, scene: &mut Scene, parent_transform: DAffine2, _context: &mut RenderContext, render_params: &RenderParams) {
@@ -2487,6 +2738,71 @@ impl Render for List<String> {
 		}
 	}
 
+	fn render_tikz(&self, render: &mut TikzRender, render_params: &RenderParams) {
+		for index in 0..self.len() {
+			let Some(text) = self.element(index) else { continue };
+			if text.is_empty() {
+				continue;
+			}
+
+			let item_transform: DAffine2 = self.attribute_cloned_or_default(ATTR_TRANSFORM, index);
+			let opacity_attr: f64 = self.attribute_cloned_or(ATTR_OPACITY, index, 1.);
+			let opacity_fill_attr: f64 = self.attribute_cloned_or(ATTR_OPACITY_FILL, index, 1.);
+			let font: Resource = {
+				let f: Resource = self.attribute_cloned_or_default(ATTR_FONT, index);
+				if f.is_empty() { text_nodes::FALLBACK_FONT_RESOURCE.clone() } else { f }
+			};
+			let font_size: f64 = self.attribute_cloned_or(ATTR_FONT_SIZE, index, DEFAULT_FONT_SIZE);
+			let line_height: f64 = self.attribute_cloned_or(ATTR_LINE_HEIGHT, index, 1.2);
+			let letter_spacing: f64 = self.attribute_cloned_or(ATTR_LETTER_SPACING, index, 0.);
+			let max_width: Option<f64> = self.attribute_cloned_or(ATTR_MAX_WIDTH, index, None);
+			let max_height: Option<f64> = self.attribute_cloned_or(ATTR_MAX_HEIGHT, index, None);
+			let letter_tilt: f64 = self.attribute_cloned_or(ATTR_LETTER_TILT, index, 0.);
+			let align: text_nodes::TextAlign = self.attribute_cloned_or_default(ATTR_TEXT_ALIGN, index);
+
+			let typesetting = text_nodes::TypesettingConfig {
+				font_size,
+				line_height_ratio: line_height,
+				letter_spacing,
+				letter_tilt,
+				max_width,
+				max_height,
+				align,
+			};
+
+			let group_opacity = render.current_opacity() * (opacity_attr * if render_params.for_mask { 1. } else { opacity_fill_attr });
+			render.push_transform(item_transform);
+			render.push_opacity(group_opacity);
+
+			let mut glyph_paths: Vec<String> = Vec::new();
+			text_nodes::TextContext::with_thread_local(|ctx| {
+				let Some(layout) = ctx.layout_text(text, &font, typesetting) else { return };
+				let tilt_tan = letter_tilt.to_radians().tan();
+				text_nodes::for_each_styled_glyph_run(&layout, text, typesetting, |glyph_run, x_offset, space_extra| {
+					draw_glyph_run_to_bezpaths(glyph_run, x_offset, space_extra, tilt_tan, |bez_path| {
+						let mut p = bez_path.clone();
+						apply_affine_to_bezpath(&mut p, render.current_transform());
+						glyph_paths.push(bezpath_to_tikz(&p));
+					});
+				});
+			});
+
+			// Glyph outlines are filled solid black (matching the Vello/SVG baseline). Color/group
+			// opacity come from the layer attributes; per-glyph fill color is not separately tracked.
+			for d in glyph_paths {
+				let mut opts = "fill=black".to_string();
+				let alpha = render.current_opacity();
+				if alpha < 1. {
+					opts.push_str(&format!(", fill opacity={alpha:.3}"));
+				}
+				render.push(format!("\\path[{opts}] {d};"));
+			}
+
+			render.pop_opacity();
+			render.pop_transform();
+		}
+	}
+
 	fn render_to_vello(&self, scene: &mut Scene, transform: DAffine2, _context: &mut RenderContext, render_params: &RenderParams) {
 		for index in 0..self.len() {
 			let Some(text) = self.element(index) else { continue };
@@ -2657,5 +2973,97 @@ impl SvgRenderAttrs<'_> {
 	}
 	pub fn push_val(&mut self, value: impl Into<SvgSegment>) {
 		self.0.svg.push(value.into());
+	}
+}
+
+#[cfg(test)]
+mod tikz_export_tests {
+	use crate::renderer::{Render, RenderParams};
+	use crate::tikz::{TikzRender, TikzRenderOutput};
+	use core_types::list::{List, ATTR_FILL, ATTR_GRADIENT_TYPE, ATTR_STROKE};
+	use core_types::Color;
+	use graphic_types::graphic::set_paint_attribute_at;
+	use kurbo::BezPath;
+	use vector_types::gradient::{Gradient, GradientType};
+	use vector_types::vector::style::Stroke;
+	use vector_types::Vector;
+
+	fn rect() -> BezPath {
+		let mut b = BezPath::new();
+		b.move_to((10.0, 10.0));
+		b.line_to((110.0, 10.0));
+		b.line_to((110.0, 90.0));
+		b.line_to((10.0, 90.0));
+		b.close_path();
+		b
+	}
+
+	fn ellipse() -> BezPath {
+		let k = 0.552_284_749_8 * 50.0;
+		let mut b = BezPath::new();
+		b.move_to((60.0, 0.0));
+		b.curve_to((60.0 + k, 0.0), (110.0, 50.0 - k), (110.0, 50.0));
+		b.curve_to((110.0, 50.0 + k), (60.0 + k, 100.0), (60.0, 100.0));
+		b.curve_to((60.0 - k, 100.0), (10.0, 50.0 + k), (10.0, 50.0));
+		b.curve_to((10.0, 50.0 - k), (60.0 - k, 0.0), (60.0, 0.0));
+		b.close_path();
+		b
+	}
+
+	fn solid(color: Color) -> List<Color> {
+		List::new_from_element(color)
+	}
+
+	fn gradient(c0: Color, c1: Color) -> List<Gradient> {
+		List::new_from_element(Gradient {
+			position: vec![0.0, 1.0],
+			midpoint: vec![0.5],
+			color: vec![c0, c1],
+		})
+	}
+
+	// Generates a real `.tex` from the TikZ renderer and asserts it is non-empty.
+	// The actual LaTeX validity is checked by compiling it with Tectonic (see task write-up).
+	#[test]
+	fn tikz_export_produces_compilable_document() {
+		// 1) Solid fill + dashed stroke
+		let mut v1 = Vector::from_bezpath(rect());
+		let mut s1 = Stroke::new(3.0);
+		s1.dash_lengths = vec![6.0, 3.0];
+		v1.stroke = Some(s1);
+		let mut list1 = List::new_from_element(v1);
+		set_paint_attribute_at(&mut list1, 0, ATTR_FILL, solid(Color::from_rgbaf32(0.1, 0.3, 0.9, 1.0).unwrap()));
+		set_paint_attribute_at(&mut list1, 0, ATTR_STROKE, solid(Color::from_rgbaf32(0.0, 0.0, 0.0, 1.0).unwrap()));
+
+		// 2) 2-stop linear gradient fill
+		let v2 = Vector::from_bezpath(ellipse());
+		let mut grad_fill = gradient(Color::from_rgbaf32(0.9, 0.1, 0.1, 1.0).unwrap(), Color::from_rgbaf32(0.1, 0.8, 0.2, 1.0).unwrap());
+		grad_fill.set_attribute(ATTR_GRADIENT_TYPE, 0, GradientType::Linear);
+		let mut list2 = List::new_from_element(v2);
+		set_paint_attribute_at(&mut list2, 0, ATTR_FILL, grad_fill);
+
+		// 3) Gradient stroke (approximated as solid)
+		let mut v3 = Vector::from_bezpath(rect());
+		v3.stroke = Some(Stroke::new(2.0));
+		let mut grad_stroke = gradient(Color::from_rgbaf32(0.0, 0.0, 0.0, 1.0).unwrap(), Color::from_rgbaf32(1.0, 1.0, 1.0, 1.0).unwrap());
+		grad_stroke.set_attribute(ATTR_GRADIENT_TYPE, 0, GradientType::Linear);
+		let mut list3 = List::new_from_element(v3);
+		set_paint_attribute_at(&mut list3, 0, ATTR_STROKE, grad_stroke);
+
+		let mut render = TikzRender::default();
+		let params = RenderParams::default();
+		list1.render_tikz(&mut render, &params);
+		list2.render_tikz(&mut render, &params);
+		list3.render_tikz(&mut render, &params);
+
+		let doc = TikzRenderOutput::from(render).to_document();
+		assert!(doc.contains("\\documentclass{article}"), "exported .tex must be a standalone LaTeX document");
+		assert!(doc.contains("\\begin{document}"), "exported .tex must open the document environment");
+		assert!(doc.contains("\\begin{tikzpicture}"), "TikzRenderOutput must wrap the body in a tikzpicture");
+		assert!(doc.contains("\\shade"), "expected a gradient \\shade command for the 2-stop fill");
+		assert!(doc.contains("dash pattern"), "expected a dashed stroke");
+
+		std::fs::write("/tmp/tikz_verify.tex", &doc).expect("failed to write /tmp/tikz_verify.tex");
+		eprintln!("{doc}");
 	}
 }
