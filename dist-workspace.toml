@@ -15,15 +15,18 @@
 #   `dist init` rewrites this file and resets `installers` to []; re-run
 #   `dist generate` (NOT `dist init`) after editing to avoid clobbering.
 #
-#   GOTCHA — cargo-dist v0.32.0 `--print=linkage` build bug:
-#   `dist generate` also rewrites `.github/workflows/release.yml` and re-adds
-#   `dist build ... --print=linkage`. That flag triggers cargo-dist's linkage
-#   report, which double-appends the object-file extension (e.g.
-#   "...rcgu.o.rcgu.o"). The Windows linker then fails with LNK1104 and Linux
-#   rustc fails with "could not write output ... permission denied" while building
-#   the graphite desktop binary (macOS tolerates it). After ANY `dist generate`,
+#   GOTCHA — cargo-dist v0.32.0 `--print=linkage` build bug (now FIXED +
+#   protected by `allow-dirty = ["ci"]` above):
+#   `dist generate` emits `dist build ... --print=linkage`. That flag triggers
+#   cargo-dist's linkage report, which double-appends the object-file extension
+#   (e.g. "...rcgu.o.rcgu.o"). The Windows linker then fails with LNK1104 and
+#   Linux rustc fails with "could not write output ... permission denied" while
+#   building the graphite desktop binary (macOS tolerates it). The fix is to
 #   remove `--print=linkage` from the `dist build` line in release.yml (see the
-#   inline comment there). A plain `dist build` still produces the binary + archive.
+#   inline comment there); a plain `dist build` still produces the binary +
+#   archive. To stop cargo-dist's startup `generate --check` from rejecting the
+#   hand-edited release.yml (and stop `dist generate` from re-adding the flag),
+#   `allow-dirty = ["ci"]` is set in the [dist] table — do NOT remove it.
 #
 # Why cargo-dist (see docs/adr/ADR-004-cargo-dist-release-tooling.md):
 #   Framework-agnostic release pipeline that generates per-OS installers
@@ -51,6 +54,15 @@ members = ["cargo:."]
 cargo-dist-version = "0.32.0"
 # CI backends to support
 ci = "github"
+# REQUIRED to keep the hand-edited `release.yml` (see GOTCHA below). cargo-dist
+# v0.32.0 runs a `generate --check` on startup and refuses to proceed if the
+# committed `release.yml` differs from what `dist generate` would emit. We
+# deliberately removed `--print=linkage` from the `dist build` line (linkage
+# report double-appends the object-file extension, breaking Win/Linux builds),
+# so the file will ALWAYS be "out of date". `allow-dirty = ["ci"]` opts out of
+# that check for the CI script only — `dist generate` will no longer touch
+# release.yml, so the fix persists across regenerations.
+allow-dirty = ["ci"]
 # The installers to generate for each app.
 # v0.32.0 valid kinds: shell, powershell, npm, homebrew, msi, pkg.
 # NOTE: deb/rpm/appimage are NOT supported in v0.32.0 (added in later
