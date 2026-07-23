@@ -1043,7 +1043,13 @@ impl OverlayContext {
 		}
 
 		let image_data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(wasm_bindgen::Clamped(&data), PATTERN_WIDTH as u32, PATTERN_HEIGHT as u32).unwrap();
-		pattern_context.put_image_data(&image_data, 0, 0).unwrap();
+		// web-sys `put_image_data` is `(i32, i32)` when built with `--cfg=web_sys_unstable_apis`
+		// and `(f64, f64)` otherwise; pick the matching literal type.
+		#[cfg(web_sys_unstable_apis)]
+		let (dx, dy) = (0, 0);
+		#[cfg(not(web_sys_unstable_apis))]
+		let (dx, dy) = (0.0, 0.0);
+		pattern_context.put_image_data(&image_data, dx, dy).unwrap();
 		let pattern = self.render_context.create_pattern_with_offscreen_canvas(&pattern_canvas, "repeat").unwrap().unwrap();
 
 		self.push_path(subpaths, transform);

@@ -174,13 +174,20 @@ pub(crate) fn render_image_data_to_canvases<'a>(image_data: impl IntoIterator<It
 			.expect("2d context was not found")
 			.dyn_into::<CanvasRenderingContext2d>()
 			.expect("Failed to cast context to CanvasRenderingContext2d");
-		let clamped_pixels = wasm_bindgen::Clamped(pixels);
-		match ImageData::new_with_u8_clamped_array_and_sh(clamped_pixels, width, height) {
-			Ok(image_data_obj) => {
-				if context.put_image_data(&image_data_obj, 0, 0).is_err() {
-					error!("Failed to put image data on canvas for id: {placeholder_id}");
+			let clamped_pixels = wasm_bindgen::Clamped(pixels);
+			match ImageData::new_with_u8_clamped_array_and_sh(clamped_pixels, width, height) {
+				Ok(image_data_obj) => {
+					// web-sys `put_image_data` is `(i32, i32)` when built with
+					// `--cfg=web_sys_unstable_apis` and `(f64, f64)` otherwise; pick the
+					// matching literal type so the call compiles in both configurations.
+					#[cfg(web_sys_unstable_apis)]
+					let (dx, dy) = (0, 0);
+					#[cfg(not(web_sys_unstable_apis))]
+					let (dx, dy) = (0.0, 0.0);
+					if context.put_image_data(&image_data_obj, dx, dy).is_err() {
+						error!("Failed to put image data on canvas for id: {placeholder_id}");
+					}
 				}
-			}
 			Err(e) => {
 				error!("Failed to create ImageData for id: {placeholder_id}: {e:?}");
 			}
