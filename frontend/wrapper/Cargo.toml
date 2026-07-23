@@ -46,6 +46,7 @@ serde_bytes = { workspace = true }
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
 	'cfg(wasm_bindgen_unstable_test_coverage)',
+	'cfg(web_sys_unstable_apis)',
 ] }
 
 [package.metadata.cargo-shear]
