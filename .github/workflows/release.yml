@@ -93,6 +93,12 @@ jobs:
           cargo binstall --no-confirm --force "cargo-about@$env:CARGO_ABOUT_VERSION"
           cargo binstall --no-confirm --force "wasm-bindgen-cli@$env:WASM_BINDGEN_CLI_VERSION"
 
+      - name: Fetch dependencies (warm cargo cache for offline license generation)
+        shell: bash
+        run: |
+          cargo fetch --locked
+          cargo fetch --locked --target wasm32-unknown-unknown || true
+
       - name: Build desktop bundle
         shell: bash
         env:
@@ -176,6 +182,12 @@ jobs:
           cargo binstall --no-confirm --force "cargo-about@${CARGO_ABOUT_VERSION}"
           cargo binstall --no-confirm --force "wasm-bindgen-cli@${WASM_BINDGEN_CLI_VERSION}"
 
+      - name: Fetch dependencies (warm cargo cache for offline license generation)
+        shell: bash
+        run: |
+          cargo fetch --locked
+          cargo fetch --locked --target wasm32-unknown-unknown || true
+
       - name: Build desktop bundle
         env:
           CARGO_TERM_COLOR: always
@@ -256,6 +268,12 @@ jobs:
 
           cargo binstall --no-confirm --force "cargo-about@${CARGO_ABOUT_VERSION}"
           cargo binstall --no-confirm --force "wasm-bindgen-cli@${WASM_BINDGEN_CLI_VERSION}"
+
+      - name: Fetch dependencies (warm cargo cache for offline license generation)
+        shell: bash
+        run: |
+          cargo fetch --locked
+          cargo fetch --locked --target wasm32-unknown-unknown || true
 
       - name: Build desktop bundle
         env:
