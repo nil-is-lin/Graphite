@@ -103,6 +103,7 @@ deps.crane.lib.buildPackage (
     };
 
     postPatch = ''
+      rm -rf branding
       mkdir branding
       cp -r ${branding}/* branding
       cp ${info.src}/.branding branding/.branding
