@@ -104,7 +104,7 @@ jobs:
         run: Compress-Archive -Path target/release/Graphite -DestinationPath graphite-windows-x64.zip
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v6
         with:
           name: graphite-windows-x64
           path: graphite-windows-x64.zip
@@ -185,7 +185,7 @@ jobs:
         run: ditto -c -k --keepParent target/release/Graphite.app graphite-macos-arm64.zip
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v6
         with:
           name: graphite-macos-arm64
           path: graphite-macos-arm64.zip
@@ -266,7 +266,7 @@ jobs:
         run: ditto -c -k --keepParent target/release/Graphite.app graphite-macos-x64.zip
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v6
         with:
           name: graphite-macos-x64
           path: graphite-macos-x64.zip
@@ -295,7 +295,7 @@ jobs:
         run: nix build .#graphite-bundle.tar.xz && cp ./result graphite-linux-x64.tar.xz
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v6
         with:
           name: graphite-linux-x64
           path: graphite-linux-x64.tar.xz
@@ -311,7 +311,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v6
         with:
           pattern: graphite-*
           path: artifacts
