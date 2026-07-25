@@ -57,7 +57,7 @@ authors = ["Graphite Authors <contact@graphite.art>"]
 homepage = "https://graphite.art"
 repository = "https://github.com/nil-is-lin/Graphite.git"
 license = "Apache-2.0"
-version = "0.0.0"
+version = "0.2.0"
 readme = "README.md"
 publish = false
 
