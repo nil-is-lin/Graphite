@@ -205,7 +205,7 @@ jobs:
 
   macos-x64:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
-    runs-on: macos-13
+    runs-on: macos-15-intel
     env:
       WASM_BINDGEN_CLI_VERSION: "0.2.121"
       BINARYEN_VERSION: "130"
