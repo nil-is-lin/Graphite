@@ -203,93 +203,6 @@ jobs:
           path: graphite-macos-arm64.zip
           compression-level: 0
 
-  macos-x64:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
-    runs-on: macos-15-intel
-    env:
-      WASM_BINDGEN_CLI_VERSION: "0.2.121"
-      BINARYEN_VERSION: "130"
-      CARGO_ABOUT_VERSION: "0.9.0"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-          cache: false
-          rustflags: ""
-          target: wasm32-unknown-unknown
-
-      - name: Cargo cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            frontend/package-lock.json
-
-      - name: Install native dependencies
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          BINSTALL_DISABLE_TELEMETRY: "true"
-        run: |
-          brew update
-          brew install \
-            pkg-config \
-            openssl@3 \
-            llvm \
-            cargo-binstall
-
-          echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> $GITHUB_ENV
-          echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
-
-          BINARYEN_DIR="$HOME/.cache/binaryen-version_$BINARYEN_VERSION"
-          if [ ! -x "$BINARYEN_DIR/bin/wasm-opt" ]; then
-            mkdir -p "$BINARYEN_DIR"
-            curl -sSfL "https://github.com/WebAssembly/binaryen/releases/download/version_$BINARYEN_VERSION/binaryen-version_$BINARYEN_VERSION-x86_64-macos.tar.gz" | tar xz -C "$BINARYEN_DIR" --strip-components=1
-          fi
-          echo "$BINARYEN_DIR/bin" >> $GITHUB_PATH
-
-          cargo binstall --no-confirm --force "cargo-about@${CARGO_ABOUT_VERSION}"
-          cargo binstall --no-confirm --force "wasm-bindgen-cli@${WASM_BINDGEN_CLI_VERSION}"
-
-      - name: Fetch dependencies (warm cargo cache for offline license generation)
-        shell: bash
-        run: |
-          cargo fetch --locked
-          cargo fetch --locked --target wasm32-unknown-unknown || true
-
-      - name: Build desktop bundle
-        env:
-          CARGO_TERM_COLOR: always
-        run: cargo run build desktop
-
-      - name: Package
-        run: ditto -c -k --keepParent target/release/Graphite.app graphite-macos-x64.zip
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: graphite-macos-x64
-          path: graphite-macos-x64.zip
-          compression-level: 0
-
   linux:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
@@ -320,7 +233,7 @@ jobs:
           compression-level: 0
 
   publish:
-    needs: [windows, macos-arm64, macos-x64, linux]
+    needs: [windows, macos-arm64, linux]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
